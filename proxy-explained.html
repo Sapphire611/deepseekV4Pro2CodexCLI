@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>proxy.js 源码解析 — Codex → DeepSeek 代理</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=JetBrains+Mono:wght@400;500&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #08090b;
+  --surface: #101216;
+  --surface2: #181a20;
+  --border: #232530;
+  --text: #b8bec8;
+  --text-bright: #e2e6ed;
+  --muted: #5e6470;
+  --accent: #e6a817;
+  --accent-dim: #6b5010;
+  --accent-glow: rgba(230, 168, 23, 0.12);
+  --string: #7ecb8b;
+  --keyword: #c792ea;
+  --comment: #4e5462;
+  --func: #82aaff;
+  --number: #f78c6c;
+  --red: #f44747;
+  --radius: 6px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Header ── */
+.hero {
+  padding: 100px 0 80px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 70% 50% at 50% 40%, var(--accent-glow), transparent);
+  pointer-events: none;
+}
+.hero h1 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 700;
+  color: var(--text-bright);
+  letter-spacing: -0.02em;
+  position: relative;
+}
+.hero h1 span { color: var(--accent); }
+.hero p {
+  margin-top: 16px;
+  font-size: 1.15rem;
+  color: var(--muted);
+  max-width: 600px;
+  margin-inline: auto;
+  position: relative;
+}
+
+/* ── Layout ── */
+.container { max-width: 1100px; margin: 0 auto; padding: 0 32px; }
+
+/* ── Architecture Diagram ── */
+.arch {
+  display: flex; align-items: center; justify-content: center; gap: 0;
+  padding: 48px 0; flex-wrap: wrap;
+}
+.arch-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 24px;
+  text-align: center;
+  font-size: 0.9rem;
+  position: relative;
+  min-width: 120px;
+}
+.arch-box strong { display: block; color: var(--text-bright); font-size: 1rem; margin-bottom: 4px; }
+.arch-box .sub { color: var(--muted); font-size: 0.78rem; }
+.arch-arrow {
+  color: var(--accent);
+  font-size: 1.5rem;
+  padding: 0 12px;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 2px;
+}
+.arch-arrow .label {
+  font-size: 0.7rem;
+  color: var(--accent-dim);
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Section ── */
+.section {
+  margin: 72px 0;
+  scroll-margin-top: 24px;
+}
+.section-header {
+  display: flex; align-items: baseline; gap: 14px;
+  margin-bottom: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.section-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--accent);
+  background: var(--accent-glow);
+  padding: 3px 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.section-header h2 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 1.75rem;
+  color: var(--text-bright);
+  letter-spacing: -0.01em;
+}
+.section-desc {
+  color: var(--muted);
+  font-size: 0.95rem;
+  margin-bottom: 28px;
+  max-width: 680px;
+}
+
+/* ── Code Block ── */
+.code-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+.code-block .lang-tag {
+  position: absolute; top: 10px; right: 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.code-block pre {
+  padding: 20px 0;
+  margin: 0;
+  overflow-x: auto;
+  counter-reset: line;
+}
+.code-block code {
+  font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.82rem;
+  line-height: 1.65;
+  display: block;
+  white-space: pre;
+}
+.code-line {
+  display: block;
+  padding: 0 20px;
+  counter-increment: line;
+  position: relative;
+  transition: background 0.15s;
+}
+.code-line::before {
+  content: counter(line);
+  display: inline-block;
+  width: 36px;
+  text-align: right;
+  margin-right: 20px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  user-select: none;
+  flex-shrink: 0;
+}
+.code-line:hover { background: var(--surface2); }
+.code-line.highlight { background: var(--accent-glow); border-left: 2px solid var(--accent); }
+.code-line .c { color: var(--comment); font-style: italic; }
+.code-line .kw { color: var(--keyword); }
+.code-line .str { color: var(--string); }
+.code-line .fn { color: var(--func); }
+.code-line .num { color: var(--number); }
+.code-line .op { color: var(--accent); }
+
+/* annotation marker on code lines */
+.ann-marker {
+  display: inline-block;
+  width: 18px; height: 18px;
+  line-height: 18px;
+  text-align: center;
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: 50%;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-family: 'Source Sans 3', sans-serif;
+  margin-left: 6px;
+  cursor: pointer;
+  vertical-align: middle;
+  position: relative;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.ann-marker:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 12px var(--accent);
+}
+
+/* ── Annotation Panel ── */
+.ann-panel {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+.ann-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  transition: border-color 0.2s;
+  scroll-margin-top: 100px;
+}
+.ann-card:hover, .ann-card:target { border-color: var(--accent-dim); }
+.ann-card .ann-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.ann-card h4 { color: var(--text-bright); margin-bottom: 6px; font-size: 0.95rem; }
+.ann-card p { color: var(--muted); font-size: 0.85rem; line-height: 1.6; }
+.ann-card code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  background: var(--surface);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--accent);
+}
+
+/* ── SSE Lifecycle ── */
+.lifecycle {
+  display: flex; flex-wrap: wrap; gap: 12px;
+  margin: 28px 0;
+}
+.lc-step {
+  flex: 1; min-width: 140px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  text-align: center;
+  position: relative;
+}
+.lc-step .step-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.lc-step .step-event {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--text-bright);
+  word-break: break-all;
+}
+.lc-step .step-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.lc-arrow {
+  display: flex; align-items: center;
+  color: var(--accent-dim);
+  font-size: 1.2rem;
+  padding: 0 4px;
+}
+
+/* ── Comparison Table ── */
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 24px 0;
+  font-size: 0.85rem;
+}
+.compare-table th {
+  text-align: left;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-bright);
+  font-weight: 600;
+}
+.compare-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.compare-table tr:hover td { background: var(--surface2); }
+.compare-table code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+/* ── Footer ── */
+footer {
+  text-align: center; padding: 64px 0 48px;
+  border-top: 1px solid var(--border);
+  color: var(--muted); font-size: 0.85rem;
+  margin-top: 80px;
+}
+
+/* ── ToC ── */
+.toc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin: 40px 0;
+}
+.toc h3 {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 1.2rem;
+  color: var(--text-bright);
+  margin-bottom: 12px;
+}
+.toc ol { padding-left: 20px; color: var(--muted); font-size: 0.9rem; }
+.toc li { margin-bottom: 4px; }
+.toc a { color: var(--text); text-decoration: none; transition: color 0.15s; }
+.toc a:hover { color: var(--accent); }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .container { padding: 0 20px; }
+  .hero { padding: 60px 0 48px; }
+  .arch { gap: 8px; }
+  .arch-arrow { transform: rotate(90deg); padding: 8px 0; }
+  .ann-panel { grid-template-columns: 1fr; }
+  .lifecycle { flex-direction: column; }
+  .lc-arrow { transform: rotate(90deg); justify-content: center; }
+  .code-line { font-size: 0.74rem; padding: 0 12px; }
+  .code-line::before { width: 24px; margin-right: 12px; font-size: 0.66rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ HERO ═══════════════════ -->
+<header class="hero">
+  <h1><span>proxy.js</span> 源码解析</h1>
+  <p>将 OpenAI Responses API 请求透明转换为 DeepSeek Chat Completions 格式的本地代理 — 逐行拆解其工作原理</p>
+</header>
+
+<div class="container">
+
+<!-- ═══════════════════ ARCH ═══════════════════ -->
+<div class="arch">
+  <div class="arch-box"><strong>Codex CLI</strong><span class="sub">Responses API</span></div>
+  <div class="arch-arrow"><span>→</span><span class="label">POST /responses</span></div>
+  <div class="arch-box" style="border-color:var(--accent-dim);"><strong>proxy.js</strong><span class="sub">:8099</span></div>
+  <div class="arch-arrow"><span>→</span><span class="label">Chat Completions</span></div>
+  <div class="arch-box"><strong>DeepSeek</strong><span class="sub">api.deepseek.com</span></div>
+  <div class="arch-arrow"><span>←</span><span class="label">SSE stream</span></div>
+  <div class="arch-box" style="border-color:var(--accent-dim);"><strong>proxy.js</strong><span class="sub">格式转回</span></div>
+  <div class="arch-arrow"><span>←</span><span class="label">Responses SSE</span></div>
+  <div class="arch-box"><strong>Codex CLI</strong><span class="sub">渲染输出</span></div>
+</div>
+
+<!-- ═══════════════════ ToC ═══════════════════ -->
+<nav class="toc">
+  <h3>目录</h3>
+  <ol>
+    <li><a href="#s1">启动与配置 — .env 加载</a></li>
+    <li><a href="#s2">角色映射 — mapRole</a></li>
+    <li><a href="#s3">请求转换 — translateRequest</a></li>
+    <li><a href="#s4">非流式响应 — translateResponse</a></li>
+    <li><a href="#s5">流式块转换 — translateStreamChunk</a></li>
+    <li><a href="#s6">SSE 事件生命周期</a></li>
+    <li><a href="#s7">HTTP 服务器与路由</a></li>
+  </ol>
+</nav>
+
+<!-- ═══════════════════ S1: Boot ═══════════════════ -->
+<section class="section" id="s1">
+  <div class="section-header">
+    <span class="section-num">§1</span>
+    <h2>启动与配置</h2>
+  </div>
+  <p class="section-desc">
+    代理启动时最先做的事情：加载 <code>.env</code> 文件中的 API Key。不把密钥硬编码在源码中是安全基础。
+  </p>
+
+  <div class="code-block">
+    <span class="lang-tag">JavaScript</span>
+    <pre><code class="language-js">
+<span class="code-line"><span class="kw">const</span> http = <span class="fn">require</span>(<span class="str">'http'</span>);</span>
+<span class="code-line"><span class="kw">const</span> https = <span class="fn">require</span>(<span class="str">'https'</span>);</span>
+<span class="code-line"><span class="kw">const</span> fs = <span class="fn">require</span>(<span class="str">'fs'</span>);</span>
+<span class="code-line"><span class="kw">const</span> path = <span class="fn">require</span>(<span class="str">'path'</span>);</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="c">// 加载 .env 文件</span><span class="ann-marker" onclick="document.getElementById('a1').scrollIntoView({behavior:'smooth'})">1</span></span>
+<span class="code-line highlight"><span class="kw">function</span> <span class="fn">loadEnv</span>(filePath) {</span>
+<span class="code-line highlight">  <span class="kw">if</span> (!fs.<span class="fn">existsSync</span>(filePath)) <span class="kw">return</span>;</span>
+<span class="code-line highlight">  <span class="kw">const</span> content = fs.<span class="fn">readFileSync</span>(filePath, <span class="str">'utf8'</span>);</span>
+<span class="code-line highlight">  <span class="kw">for</span> (<span class="kw">const</span> line <span class="kw">of</span> content.<span class="fn">split</span>(<span class="str">'\n'</span>)) {</span>
+<span class="code-line highlight">    <span class="kw">const</span> trimmed = line.<span class="fn">trim</span>();</span>
+<span class="code-line highlight">    <span class="kw">if</span> (!trimmed || trimmed.<span class="fn">startsWith</span>(<span class="str">'#'</span>)) <span class="kw">continue</span>;</span>
+<span class="code-line highlight">    <span class="kw">const</span> eqIdx = trimmed.<span class="fn">indexOf</span>(<span class="str">'='</span>);</span>
+<span class="code-line highlight">    <span class="kw">if</span> (eqIdx === <span class="op">-</span><span class="num">1</span>) <span class="kw">continue</span>;</span>
+<span class="code-line highlight">    <span class="kw">const</span> key = trimmed.<span class="fn">slice</span>(<span class="num">0</span>, eqIdx).<span class="fn">trim</span>();</span>
+<span class="code-line highlight">    <span class="kw">const</span> val = trimmed.<span class="fn">slice</span>(eqIdx <span class="op">+</span> <span class="num">1</span>).<span class="fn">trim</span>();</span>
+<span class="code-line highlight">    <span class="kw">if</span> (!process.env[key]) {</span>
+<span class="code-line highlight">      process.env[key] = val;<span class="ann-marker" onclick="document.getElementById('a2').scrollIntoView({behavior:'smooth'})">2</span></span>
+<span class="code-line highlight">    }</span>
+<span class="code-line highlight">  }</span>
+<span class="code-line highlight">}</span>
+<span class="code-line"><span class="fn">loadEnv</span>(path.<span class="fn">join</span>(__dirname, <span class="str">'.env'</span>));</span>
+<span class="code-line"></span>
+<span class="code-line"><span class="kw">const</span> PORT = <span class="num">8099</span>;</span>
+<span class="code-line"><span class="kw">const</span> DEEPSEEK_HOST = <span class="str">'api.deepseek.com'</span>;</span>
+<span class="code-line"><span class="kw">const</span> DEEPSEEK_KEY = process.env.DEEPSEEK_KEY;<span class="ann-marker" onclick="document.getElementById('a3').scrollIntoView({behavior:'smooth'})">3</span></span>
+<span class="code-line"></span>
+<span class="code-line"><span class="kw">if</span> (!DEEPSEEK_KEY) {</span>
+<span class="code-line">  console.<span class="fn">error</span>(<span class="str">'❌ 未设置 DEEPSEEK_KEY'</span>);</span>
+<span class="code-line">  process.<span class="fn">exit</span>(<span class="num">1</span>);<span class="ann-marker" onclick="document.getElementById('a4').scrollIntoView({behavior:'smooth'})">4</span></span>
+<span class="code-line">}</span>
+    </code></pre>
+  </div>
+
+  <div class="ann-panel">
+    <div class="ann-card" id="a1">
+      <div class="ann-num">注解 1</div>
+      <h4>手写 .env 解析器</h4>
+      <p>不依赖 <code>dotenv</code> 包，用 20 行实现一个精简版。逐行读取，跳过空行和 <code>#</code> 注释，按 <code>=</code> 分割键值对。零依赖 = 零安装。</p>
+    </div>
+    <div class="ann-card" id="a2">
+      <div class="ann-num">注解 2</div>
+      <h4>环境变量优先</h4>
+      <p><code>if (!process.env[key])</code> — 只在环境变量未设置时才从 .env 取值。这意味着你可以用 <code>DEEPSEEK_KEY=xxx node proxy.js</code> 覆盖文件中的值。</p>
+    </div>
+    <div class="ann-card" id="a3">
+      <div class="ann-num">注解 3</div>
+      <h4>硬编码已移除</h4>
+      <p>Key 只从环境变量读取。如果 <code>.env</code> 文件和环境变量都没有设置，程序会报错退出，不会悄悄发空请求。</p>
+    </div>
+    <div class="ann-card" id="a4">
+      <div class="ann-num">注解 4</div>
+      <h4>Fail-fast</h4>
+      <p>没有 Key 就没有必要继续运行。<code>process.exit(1)</code> 立即终止，不会启动一个注定失败的 HTTP 服务。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ S2: mapRole ═══════════════════ -->
+<section class="section" id="s2">
+  <div class="section-header">
+    <span class="section-num">§2</span>
+    <h2>角色映射</h2>
+  </div>
+  <p class="section-desc">
+    OpenAI 的 Responses API 使用 <code>developer</code> 角色（比 system 更高级的系统消息），但 DeepSeek 的 Chat Completions API 只认 <code>system</code>。一行映射解决兼容性问题。
+  </p>
+
+  <div class="code-block">
+    <span class="lang-tag">JavaScript</span>
+    <pre><code class="language-js">
+<span class="code-line"><span class="c">/** DeepSeek 不支持的角色 → 映射为 system */</span></span>
+<span class="code-line highlight"><span class="kw">const</span> ROLE_MAP = { developer: <span class="str">'system'</span> };<span class="ann-marker" onclick="document.getElementById('a5').scrollIntoView({behavior:'smooth'})">5</span></span>
+<span class="code-line highlight"><span class="kw">function</span> <span class="fn">mapRole</span>(role) {</span>
+<span class="code-line highlight">  <span class="kw">return</span> ROLE_MAP[role] || role;</span>
+<span class="code-line highlight">}</span>
+    </code></pre>
+  </div>
+
+  <div class="ann-panel">
+    <div class="ann-card" id="a5">
+      <div class="ann-num">注解 5</div>
+      <h4>可扩展的映射表</h4>
+      <p>目前只需映射 <code>developer → system</code>。如果将来有其他不兼容角色，直接在 <code>ROLE_MAP</code> 对象中添加即可。<code>|| role</code> 保底：未知角色原样透传。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ S3: translateRequest ═══════════════════ -->
+<section class="section" id="s3">
+  <div class="section-header">
+    <span class="section-num">§3</span>
+    <h2>请求转换：Responses API → Chat Completions</h2>
+  </div>
+  <p class="section-desc">
+    这是代理最核心的函数。Codex 发来的请求是 OpenAI Responses API 格式 — 使用 <code>input</code> 数组和 <code>instructions</code> 字段。DeepSeek 只接受 Chat Completions 格式 — 使用 <code>messages</code> 数组。两侧的数据结构完全不同，需要逐字段翻译。
+  </p>
+
+  <table class="compare-table">
+    <tr>
+      <th style="width:45%">Responses API（Codex 发来）</th>
+      <th style="width:10%"></th>
+      <th style="width:45%">Chat Completions（发给 DeepSeek）</th>
+    </tr>
+    <tr>
+      <td><code>{ instructions: "...", input: [...] }</code></td>
+      <td style="text-align:center;color:var(--accent)">→</td>
+      <td><code>{ messages: [{role:"system",...}, ...] }</code></td>
+    </tr>
+    <tr>
+      <td><code>input</code> 是数组，支持多种格式</td>
+      <td style="text-align:center;color:var(--accent)">→</td>
+      <td><code>messages</code> 统一为 <code>{role, content}</code></td>
+    </tr>
+    <tr>
+      <td><code>max_output_tokens</code></td>
+      <td style="text-align:center;color:var(--accent)">→</td>
+      <td><code>max_tokens</code>（字段名不同）</td>
+    </tr>
+    <tr>
+      <td><code>model: "deepseek-v4-pro[1m]"</code></td>
+      <td style="text-align:center;color:var(--accent)">→</td>
+      <td>去掉 <code>[1m]</code> 后缀</td>
+    </tr>
+  </table>
+
+  <div class="code-block">
+    <span class="lang-tag">JavaScript</span>
+    <pre><code class="language-js">
+<span class="code-line"><span class="kw">function</span> <span class="fn">translateRequest</span>(body) {</span>
+<span class="code-line">  <span class="kw">const</span> messages = [];</span>
+<span class="code-line"></span>
+<span class="code-line highlight">  <span class="c">// instructions → system message</span></span>
+<span class="code-line highlight">  <span class="kw">if</span> (body.instructions) {</span>
+<span class="code-line highlight">    messages.<span class="fn">push</span>({ role: <span class="str">'system'</span>, content: body.instructions });<span class="ann-marker" onclick="document.getElementById('a6').scrollIntoView({behavior:'smooth'})">6</span></span>
+<span class="code-line highlight">  }</span>
+<span class="code-line"></span>
+<span class="code-line highlight">  <span class="kw">const</span> input = body.input;</span>
+<span class="code-line highlight">  <span class="kw">if</span> (<span class="kw">typeof</span> input === <span class="str">'string'</span>) {</span>
+<span class="code-line highlight">    messages.<span class="fn">push</span>({ role: <span class="str">'user'</span>, content: input });<span class="ann-marker" onclick="document.getElementById('a7').scrollIntoView({behavior:'smooth'})">7</span></span>
+<span class="code-line highlight">  } <span class="kw">else</span> <span class="kw">if</span> (Array.<span class="fn">isArray</span>(input)) {</span>
+<span class="code-line">    <span class="kw">for</span> (<span class="kw">const</span> item <span class="kw">of</span> input) {</span>
+<span class="code-line"></span>
+<span class="code-line highlight">      <span class="c">// ── 格式 1: 纯字符串 ──</span></span>
+<span class="code-line highlight">      <span class="kw">if</span> (<span class="kw">typeof</span> item === <span class="str">'string'</span>) {</span>
+<span class="code-line highlight">        messages.<span class="fn">push</span>({ role: <span class="str">'user'</span>, content: item });<span class="ann-marker" onclick="document.getElementById('a8').scrollIntoView({behavior:'smooth'})">8</span></span>
+<span class="code-line highlight">      }</span>
+<span class="code-line"></span>
+<span class="code-line highlight">      <span class="c">// ── 格式 2: {role, content} 标准消息 ──</span></span>
+<span class="code-line highlight">      } <span class="kw">else</span> <span class="kw">if</span> (item.role) {<span class="ann-marker" onclick="document.getElementById('a9').scrollIntoView({behavior:'smooth'})">9</span></span>
+<span class="code-line">        <span class="kw">if</span> (Array.<span class="fn">isArray</span>(item.content)) {</span>
+<span class="code-line">          <span class="c">// content 可能是 [{type:'output_text', text:'...'}]</span></span>
+<span class="code-line">          <span class="kw">const</span> text = item.content</span>
+<span class="code-line">            .<span class="fn">filter</span>(c => c.type === <span class="str">'output_text'</span> || c.type === <span class="str">'input_text'</span>)</span>
+<span class="code-line">            .<span class="fn">map</span>(c => c.text).<span class="fn">join</span>(<span class="str">''</span>);</span>
+<span class="code-line">          messages.<span class="fn">push</span>({ role: <span class="fn">mapRole</span>(item.role), content: text });</span>
+<span class="code-line">        } <span class="kw">else</span> {</span>
+<span class="code-line">          messages.<span class="fn">push</span>({ role: <span class="fn">mapRole</span>(item.role), content: item.content || <span class="str">''</span> });</span>
+<span class="code-line">        }</span>
+<span class="code-line"></span>
+<span class="code-line highlight">      <span class="c">// ── 格式 3: {type:"input_text", text:...} ──</span></span>
+<span class="code-line highlight">      } <span class="kw">else</span> <span class="kw">if</span> (item.type === <span class="str">'input_text'</span> || item.type === <span class="str">'input_image'</span>) {<span class="ann-marker" onclick="document.getElementById('a10').scrollIntoView({behavior:'smooth'})">10</span></span>
+<span class="code-line highlight">        messages.<span class="fn">push</span>({ role: <span class="str">'user'</span>, content: item.text || <span class="str">'[image]'</span> });</span>
+<span class="code-line highlight">      }</span>
+<span class="code-line"></span>
+<span class="code-line">      <span class="c">// ── 格式 4: {type:"message", ...} ──</span></span>
+<span class="code-line">      } <span class="kw">else</span> <span class="kw">if</span> (item.type === <span class="str">'message'</span>) { ... }</span>
+<span class="code-line">    }</span>
+<span class="code-line">  }</span>
+<span class="code-line"></span>
+<span class="code-line highlight">  <span class="c">// 去掉 [1m] 后缀 — DeepSeek 不认这个格式</span></span>
+<span class="code-line highlight">  <span class="kw">const</span> model = (body.model || <span class="str">'deepseek-v4-pro'</span>).<span class="fn">replace</span>(<span class="str">/\[.*\]/g</span>, <span class="str">''</span>);<span class="ann-marker" onclick="document.getElementById('a11').scrollIntoView({behavior:'smooth'})">11</span></span>
+<span class="code-line"></span>
+<span class="code-line">  <span class="kw">const</span> result = { model, messages, stream: body.stream || <span class="kw">false</span> };</span>
+<span class="code-line">  <span class="kw">if</span> (body.max_output_tokens) result.max_tokens = body.max_output_tokens;</span>
+<span class="code-line">  <span class="kw">if</span> (body.temperature != <span class="kw">null</span>) result.temperature = body.temperature;</span>
+<span class="code-line">  <span class="kw">if</span> (body.top_p != <span class="kw">null</span>) result.top_p = body.top_p;</span>
+<span class="code-line">  <span class="kw">return</span> result;</span>
+<span class="code-line">}</span>
+    </code></pre>
+  </div>
+
+  <div class="ann-panel">
+    <div class="ann-card" id="a6">
+      <div class="ann-num">注解 6</div>
+      <h4>instructions → system 消息</h4>
+      <p>Responses API 把系统提示词放在顶层 <code>instructions</code> 字段；Chat Completions 把它作为第一条 <code>role: "system"</code> 消息。这是两套 API 最根本的结构性差异。</p>
+    </div>
+    <div class="ann-card" id="a7">
+      <div class="ann-num">注解 7</div>
+      <h4>简洁路径：纯文本输入</h4>
+      <p>如果用户只发了纯文本（如 <code>"hi"</code>），<code>input</code> 是一个字符串，直接包装成 user 消息。</p>
+    </div>
+    <div class="ann-card" id="a8">
+      <div class="ann-num">注解 8</div>
+      <h4>格式 1：数组中的纯字符串</h4>
+      <p><code>input: ["第一条消息", "第二条消息"]</code> — 每项就是一个 user 消息。</p>
+    </div>
+    <div class="ann-card" id="a9">
+      <div class="ann-num">注解 9</div>
+      <h4>格式 2：标准消息对象</h4>
+      <p><code>{role: "user", content: "..."}</code> 或 <code>{role: "assistant", content: [{type: "output_text", text: "..."}]}</code> — content 可能是字符串或数组，需要分别处理。多轮对话中的历史消息用这种格式。</p>
+    </div>
+    <div class="ann-card" id="a10">
+      <div class="ann-num">注解 10</div>
+      <h4>格式 3：Content Block</h4>
+      <p><code>{type: "input_text", text: "hi"}</code> — Responses API 的 content block 格式，没有 <code>role</code> 字段。这种格式在旧版代理中被静默丢弃，导致 codex 没响应 — 这是踩过的坑。</p>
+    </div>
+    <div class="ann-card" id="a11">
+      <div class="ann-num">注解 11</div>
+      <h4>模型名后缀去除</h4>
+      <p>Codex 在模型名后加 <code>[1m]</code> 表示 1M 上下文窗口。正则 <code>/\[.*\]/g</code> 去掉这个后缀，因为 DeepSeek API 不识别它。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ S4: translateResponse ═══════════════════ -->
+<section class="section" id="s4">
+  <div class="section-header">
+    <span class="section-num">§4</span>
+    <h2>非流式响应转换：Chat Completions → Responses API</h2>
+  </div>
+  <p class="section-desc">
+    当 Codex 以非流式模式（<code>stream: false</code>）请求时，DeepSeek 一次性返回完整 JSON。需要把 Chat Completions 的响应结构逆向翻译回 Responses API 格式。
+  </p>
+
+  <div class="code-block">
+    <span class="lang-tag">JavaScript</span>
+    <pre><code class="language-js">
+<span class="code-line"><span class="kw">function</span> <span class="fn">translateResponse</span>(chatResp, model) {</span>
+<span class="code-line">  <span class="kw">const</span> choice = chatResp.choices?.[<span class="num">0</span>];</span>
+<span class="code-line"></span>
+<span class="code-line highlight">  <span class="kw">const</span> content = choice.message?.content || <span class="str">''</span>;</span>
+<span class="code-line highlight">  <span class="kw">const</span> reasoning = choice.message?.reasoning_content || <span class="str">''</span>;<span class="ann-marker" onclick="document.getElementById('a12').scrollIntoView({behavior:'smooth'})">12</span></span>
+<span class="code-line"></span>
+<span class="code-line">  <span class="kw">const</span> output = [];</span>
+<span class="code-line highlight">  <span class="kw">if</span> (reasoning) {</span>
+<span class="code-line highlight">    output.<span class="fn">push</span>({</span>
+<span class="code-line highlight">      id: <span class="fn">genId</span>(<span class="str">'rs'</span>),</span>
+<span class="code-line highlight">      type: <span class="str">'reasoning'</span>,</span>
+<span class="code-line highlight">      content: [{ type: <span class="str">'reasoning_text'</span>, text: reasoning }],</span>
+<span class="code-line highlight">    });<span class="ann-marker" onclick="document.getElementById('a13').scrollIntoView({behavior:'smooth'})">13</span></span>
+<span class="code-line highlight">  }</span>
+<span class="code-line">  output.<span class="fn">push</span>({</span>
+<span class="code-line">    id: <span class="fn">genId</span>(<span class="str">'msg'</span>),</span>
+<span class="code-line">    type: <span class="str">'message'</span>,</span>
+<span class="code-line">    role: <span class="str">'assistant'</span>,</span>
+<span class="code-line">    content: [{ type: <span class="str">'output_text'</span>, text: content }],</span>
+<span class="code-line">  });</span>
+<span class="code-line"></span>
+<span class="code-line highlight">  <span class="c">// usage 字段名也不一样</span></span>
+<span class="code-line highlight">  <span class="kw">return</span> {</span>
+<span class="code-line highlight">    id: chatResp.id || <span class="str">'resp_'</span> <span class="op">+</span> Date.<span class="fn">now</span>().<span class="fn">toString</span>(<span class="num">36</span>),</span>
+<span class="code-line highlight">    object: <span class="str">'response'</span>,</span>
+<span class="code-line highlight">    output,</span>
+<span class="code-line highlight">    usage: {</span>
+<span class="code-line highlight">      input_tokens: chatResp.usage?.prompt_tokens || <span class="num">0</span>,</span>
+<span class="code-line highlight">      output_tokens: chatResp.usage?.completion_tokens || <span class="num">0</span>,</span>
+<span class="code-line highlight">      total_tokens: chatResp.usage?.total_tokens || <span class="num">0</span>,<span class="ann-marker" onclick="document.getElementById('a14').scrollIntoView({behavior:'smooth'})">14</span></span>
+<span class="code-line highlight">    },</span>
+<span class="code-line highlight">  };</span>
+<span class="code-line">}</span>
+    </code></pre>
+  </div>
+
+  <div class="ann-panel">
+    <div class="ann-card" id="a12">
+      <div class="ann-num">注解 12</div>
+      <h4>推理内容单独提取</h4>
+      <p>DeepSeek 的推理模型在 <code>reasoning_content</code> 字段返回思考过程，和正文 <code>content</code> 是分开的。Responses API 用 <code>type: "reasoning"</code> 输出项来表示。</p>
+    </div>
+    <div class="ann-card" id="a13">
+      <div class="ann-num">注解 13</div>
+      <h4>输出项 ID</h4>
+      <p>每个输出项都需要唯一的 <code>id</code>。Codex 用这些 ID 来追踪和管理输出 — 比如在 UI 中折叠/展开推理块。</p>
+    </div>
+    <div class="ann-card" id="a14">
+      <div class="ann-num">注解 14</div>
+      <h4>Usage 字段映射</h4>
+      <p>Chat Completions 用 <code>prompt_tokens</code> / <code>completion_tokens</code>，Responses API 用 <code>input_tokens</code> / <code>output_tokens</code>。字段名不同但含义完全一致。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ S5: translateStreamChunk ═══════════════════ -->
+<section class="section" id="s5">
+  <div class="section-header">
+    <span class="section-num">§5</span>
+    <h2>流式块转换</h2>
+  </div>
+  <p class="section-desc">
+    流式模式下，DeepSeek 以 SSE 格式逐块返回。每个 chunk 包含 <code>choices[0].delta</code>，其中可能同时有推理内容和正文内容。代理将每个字段映射为对应的 Responses API SSE 事件。
+  </p>
+
+  <div class="code-block">
+    <span class="lang-tag">JavaScript</span>
+    <pre><code class="language-js">
+<span class="code-line"><span class="kw">function</span> <span class="fn">translateStreamChunk</span>(parsed) {</span>
+<span class="code-line">  <span class="kw">const</span> choice = parsed.choices?.[<span class="num">0</span>];</span>
+<span class="code-line">  <span class="kw">const</span> delta = choice.delta || {};</span>
+<span class="code-line">  <span class="kw">const</span> events = [];</span>
+<span class="code-line"></span>
+<span class="code-line highlight">  <span class="kw">if</span> (delta.reasoning_content) {</span>
+<span class="code-line highlight">    events.<span class="fn">push</span>({</span>
+<span class="code-line highlight">      event: <span class="str">'response.reasoning_text.delta'</span>,</span>
+<span class="code-line highlight">      data: { type: <span class="str">'response.reasoning_text.delta'</span>, delta: delta.reasoning_content },</span>
+<span class="code-line highlight">    });<span class="ann-marker" onclick="document.getElementById('a15').scrollIntoView({behavior:'smooth'})">15</span></span>
+<span class="code-line highlight">  }</span>
+<span class="code-line"></span>
+<span class="code-line">  <span class="kw">if</span> (delta.content) {</span>
+<span class="code-line">    events.<span class="fn">push</span>({</span>
+<span class="code-line">      event: <span class="str">'response.output_text.delta'</span>,</span>
+<span class="code-line">      data: { type: <span class="str">'response.output_text.delta'</span>, delta: delta.content },</span>
+<span class="code-line">    });</span>
+<span class="code-line">  }</span>
+<span class="code-line"></span>
+<span class="code-line highlight">  <span class="kw">if</span> (delta.tool_calls) {</span>
+<span class="code-line highlight">    <span class="kw">for</span> (<span class="kw">const</span> tc <span class="kw">of</span> delta.tool_calls) {</span>
+<span class="code-line highlight">      events.<span class="fn">push</span>({</span>
+<span class="code-line highlight">        event: <span class="str">'response.function_call_arguments.delta'</span>,</span>
+<span class="code-line highlight">        data: { call_id: tc.id, delta: tc.function?.arguments || <span class="str">''</span> },</span>
+<span class="code-line highlight">      });<span class="ann-marker" onclick="document.getElementById('a16').scrollIntoView({behavior:'smooth'})">16</span></span>
+<span class="code-line highlight">    }</span>
+<span class="code-line highlight">  }</span>
+<span class="code-line"></span>
+<span class="code-line">  <span class="kw">return</span> events.length > <span class="num">0</span> ? events : <span class="kw">null</span>;</span>
+<span class="code-line">}</span>
+    </code></pre>
+  </div>
+
+  <div class="ann-panel">
+    <div class="ann-card" id="a15">
+      <div class="ann-num">注解 15</div>
+      <h4>推理 & 正文分离</h4>
+      <p>DeepSeek 的一个 SSE chunk 可能同时包含 <code>reasoning_content</code>（思考过程）和 <code>content</code>（最终回答）。两者被映射为不同的事件类型，Codex 才能分别在 UI 中渲染。</p>
+    </div>
+    <div class="ann-card" id="a16">
+      <div class="ann-num">注解 16</div>
+      <h4>工具调用支持</h4>
+      <p>当模型调用工具（如读取文件、执行命令）时，DeepSeek 在 <code>delta.tool_calls</code> 中增量返回函数名和参数。代理将其转为 <code>function_call_arguments.delta</code> 事件。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ S6: SSE Lifecycle ═══════════════════ -->
+<section class="section" id="s6">
+  <div class="section-header">
+    <span class="section-num">§6</span>
+    <h2>SSE 事件生命周期</h2>
+  </div>
+  <p class="section-desc">
+    这是整个代理最精妙的部分，也是踩坑最多的地方。Responses API 的流式协议严格定义了一个事件序列。缺少任何一个事件，Codex 都会认为响应不完整。以下是从收到第一个 DeepSeek chunk 到响应结束的完整事件链。
+  </p>
+
+  <div class="lifecycle">
+    <div class="lc-step">
+      <div class="step-num">Step 1</div>
+      <div class="step-event">response.created</div>
+      <div class="step-note">声明响应对象创建，分配 <code>response_id</code></div>
+    </div>
+    <div class="lc-arrow">→</div>
+    <div class="lc-step">
+      <div class="step-num">Step 2</div>
+      <div class="step-event">response.in_progress</div>
+      <div class="step-note">标记响应进入生成状态</div>
+    </div>
+    <div class="lc-arrow">→</div>
+    <div class="lc-step">
+      <div class="step-num">Step 3</div>
+      <div class="step-event">output_item.added</div>
+      <div class="step-note">声明输出项（reasoning / message），分配 <code>item_id</code></div>
+    </div>
+    <div class="lc-arrow">→</div>
+    <div class="lc-step">
+      <div class="step-num">Step 4</div>
+      <div class="step-event">*_text.delta × N</div>
+      <div class="step-note">逐块发送推理和正文增量，携带 <code>item_id</code></div>
+    </div>
+    <div class="lc-arrow">→</div>
+    <div class="lc-step">
+      <div class="step-num">Step 5</div>
+      <div class="step-event">*_text.done</div>
+      <div class="step-note">标记内容生成完毕，附完整文本</div>
+    </div>
+    <div class="lc-arrow">→</div>
+    <div class="lc-step">
+      <div class="step-num">Step 6</div>
+      <div class="step-event">output_item.done</div>
+      <div class="step-note">标记输出项完成，附最终状态</div>
+    </div>
+    <div class="lc-arrow">→</div>
+    <div class="lc-step" style="border-color:var(--accent-dim);">
+      <div class="step-num">Step 7</div>
+      <div class="step-event">response.completed</div>
+      <div class="step-note">响应完成，携带完整 output 数组和 usage</div>
+    </div>
+  </div>
+
+  <p style="color:var(--muted);font-size:0.88rem;margin-top:12px;">
+    <strong style="color:var(--accent);">关键洞察：</strong>
+    最初版本只发了 Step 4 的 delta 事件，缺失了 Step 1-3 和 5-7。Codex 报 <code>"stream disconnected before completion: stream closed before response.completed"</code> — 报错信息精确指出了缺失的事件。
+    第二次修复加了 <code>response.created</code> 和 <code>response.completed</code>，但忘了 <code>output_item.added</code> 和 <code>item_id</code> 关联。Codex 不报错但也不显示任何内容 — 它收到了响应对象，但因为没有 output_item 声明，不知道 delta 事件属于哪个输出项。
+  </p>
+</section>
+
+<!-- ═══════════════════ S7: HTTP Server ═══════════════════ -->
+<section class="section" id="s7">
+  <div class="section-header">
+    <span class="section-num">§7</span>
+    <h2>HTTP 服务器与路由</h2>
+  </div>
+  <p class="section-desc">
+    使用 Node.js 内置 <code>http</code> 模块创建服务，零外部依赖。处理 CORS、路由分发、请求/响应转发。
+  </p>
+
+  <div class="code-block">
+    <span class="lang-tag">JavaScript</span>
+    <pre><code class="language-js">
+<span class="code-line highlight"><span class="c">// CORS — Codex 从本地文件运行，跨域请求需要这些头</span></span>
+<span class="code-line highlight">res.<span class="fn">setHeader</span>(<span class="str">'Access-Control-Allow-Origin'</span>, <span class="str">'*'</span>);<span class="ann-marker" onclick="document.getElementById('a17').scrollIntoView({behavior:'smooth'})">17</span></span>
+<span class="code-line">res.<span class="fn">setHeader</span>(<span class="str">'Access-Control-Allow-Headers'</span>, <span class="str">'Content-Type, Authorization, x-stainless-*'</span>);</span>
+<span class="code-line"></span>
+<span class="code-line highlight"><span class="c">// 路由：支持三种路径格式</span></span>
+<span class="code-line highlight"><span class="kw">const</span> isResponsesPath = req.method === <span class="str">'POST'</span> &&<span class="ann-marker" onclick="document.getElementById('a18').scrollIntoView({behavior:'smooth'})">18</span></span>
+<span class="code-line highlight">  (req.url === <span class="str">'/responses'</span> ||</span>
+<span class="code-line highlight">   req.url === <span class="str">'/v1/responses'</span> ||</span>
+<span class="code-line highlight">   req.url === <span class="str">'/openai/v1/responses'</span>);</span>
+<span class="code-line"></span>
+<span class="code-line highlight"><span class="c">// 流式响应 — Content-Type 必须是 text/event-stream</span></span>
+<span class="code-line highlight">res.<span class="fn">writeHead</span>(<span class="num">200</span>, {</span>
+<span class="code-line highlight">  <span class="str">'Content-Type'</span>: <span class="str">'text/event-stream'</span>,</span>
+<span class="code-line highlight">  <span class="str">'Cache-Control'</span>: <span class="str">'no-cache'</span>,</span>
+<span class="code-line highlight">  Connection: <span class="str">'keep-alive'</span>,<span class="ann-marker" onclick="document.getElementById('a19').scrollIntoView({behavior:'smooth'})">19</span></span>
+<span class="code-line highlight">});</span>
+<span class="code-line"></span>
+<span class="code-line highlight"><span class="c">// 兜底：如果流异常结束（没有 finish_reason），补发完成事件</span></span>
+<span class="code-line highlight">dsRes.<span class="fn">on</span>(<span class="str">'end'</span>, () => {</span>
+<span class="code-line highlight">  <span class="kw">if</span> (!completed) {</span>
+<span class="code-line highlight">    <span class="c">// 补发所有缺失的 .done 和 .completed 事件</span></span>
+<span class="code-line highlight">    <span class="fn">sendCompletionEvents</span>(...);<span class="ann-marker" onclick="document.getElementById('a20').scrollIntoView({behavior:'smooth'})">20</span></span>
+<span class="code-line highlight">  }</span>
+<span class="code-line highlight">  res.<span class="fn">write</span>(<span class="str">'data: [DONE]\n\n'</span>);</span>
+<span class="code-line highlight">  res.<span class="fn">end</span>();</span>
+<span class="code-line highlight">});</span>
+    </code></pre>
+  </div>
+
+  <div class="ann-panel">
+    <div class="ann-card" id="a17">
+      <div class="ann-num">注解 17</div>
+      <h4>CORS 头</h4>
+      <p><code>x-stainless-*</code> 是 OpenAI SDK 使用的自定义请求头。不加这个头，Codex 的预检请求（OPTIONS）会失败。</p>
+    </div>
+    <div class="ann-card" id="a18">
+      <div class="ann-num">注解 18</div>
+      <h4>多路径兼容</h4>
+      <p>不同版本的 Codex 或不同的 provider 配置可能使用不同路径。三种路径覆盖所有情况。</p>
+    </div>
+    <div class="ann-card" id="a19">
+      <div class="ann-num">注解 19</div>
+      <h4>SSE 必需头</h4>
+      <p><code>text/event-stream</code> 告诉客户端这是 SSE 流。 <code>no-cache</code> 防止代理/CDN 缓存流内容。 <code>keep-alive</code> 保持连接不关闭。</p>
+    </div>
+    <div class="ann-card" id="a20">
+      <div class="ann-num">注解 20</div>
+      <h4>防御性兜底</h4>
+      <p>正常情况下 DeepSeek 会在最后一个 chunk 携带 <code>finish_reason</code>，代理据此触发 <code>response.completed</code>。但如果网络异常或 API 行为变化导致流在 <code>finish_reason</code> 出现前就结束了，<code>end</code> 事件会兜底补发完成事件。Codex 永远不会卡在 "等待完成" 状态。</p>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <p>proxy.js — 总行数 587 · 零外部依赖 · 纯 Node.js 标准库</p>
+</footer>
+
+</body>
+</html>
