@@ -387,6 +387,7 @@ footer {
     <li><a href="#s5">流式块转换 — translateStreamChunk</a></li>
     <li><a href="#s6">SSE 事件生命周期</a></li>
     <li><a href="#s7">HTTP 服务器与路由</a></li>
+    <li><a href="#s8">附加规则注入 &amp; 内容过滤</a></li>
   </ol>
 </nav>
 
@@ -535,7 +536,7 @@ footer {
 <span class="code-line"><span class="kw">function</span> <span class="fn">translateRequest</span>(body) {</span>
 <span class="code-line">  <span class="kw">const</span> messages = [];</span>
 <span class="code-line"></span>
-<span class="code-line highlight">  <span class="c">// instructions → system message</span></span>
+<span class="code-line highlight">  <span class="c">// instructions → system message（附加规则注入）</span></span>
 <span class="code-line highlight">  <span class="kw">if</span> (body.instructions) {</span>
 <span class="code-line highlight">    messages.<span class="fn">push</span>({ role: <span class="str">'system'</span>, content: body.instructions });<span class="ann-marker" onclick="document.getElementById('a6').scrollIntoView({behavior:'smooth'})">6</span></span>
 <span class="code-line highlight">  }</span>
@@ -573,7 +574,8 @@ footer {
 <span class="code-line">    }</span>
 <span class="code-line">  }</span>
 <span class="code-line"></span>
-<span class="code-line highlight">  <span class="c">// 去掉 [1m] 后缀 — DeepSeek 不认这个格式</span></span>
+<span class="code-line highlight">  <span class="c">// tools 格式转换 &amp; assistant 合并 &amp; rules 注入</span></span>
+	<span class="code-line highlight">  <span class="c">// 去掉 [1m] 后缀 — DeepSeek 不认这个格式</span></span>
 <span class="code-line highlight">  <span class="kw">const</span> model = (body.model || <span class="str">'deepseek-v4-pro'</span>).<span class="fn">replace</span>(<span class="str">/\[.*\]/g</span>, <span class="str">''</span>);<span class="ann-marker" onclick="document.getElementById('a11').scrollIntoView({behavior:'smooth'})">11</span></span>
 <span class="code-line"></span>
 <span class="code-line">  <span class="kw">const</span> result = { model, messages, stream: body.stream || <span class="kw">false</span> };</span>
@@ -635,8 +637,8 @@ footer {
 <span class="code-line"><span class="kw">function</span> <span class="fn">translateResponse</span>(chatResp, model) {</span>
 <span class="code-line">  <span class="kw">const</span> choice = chatResp.choices?.[<span class="num">0</span>];</span>
 <span class="code-line"></span>
-<span class="code-line highlight">  <span class="kw">const</span> content = choice.message?.content || <span class="str">''</span>;</span>
-<span class="code-line highlight">  <span class="kw">const</span> reasoning = choice.message?.reasoning_content || <span class="str">''</span>;<span class="ann-marker" onclick="document.getElementById('a12').scrollIntoView({behavior:'smooth'})">12</span></span>
+<span class="code-line highlight">  <span class="kw">const</span> content = <span class="fn">stripContextTags</span>(choice.message?.content || <span class="str">''</span>;</span>
+<span class="code-line highlight">  <span class="kw">const</span> reasoning = <span class="fn">stripContextTags</span>(choice.message?.reasoning_content || <span class="str">''</span>;<span class="ann-marker" onclick="document.getElementById('a12').scrollIntoView({behavior:'smooth'})">12</span></span>
 <span class="code-line"></span>
 <span class="code-line">  <span class="kw">const</span> output = [];</span>
 <span class="code-line highlight">  <span class="kw">if</span> (reasoning) {</span>
@@ -723,12 +725,13 @@ footer {
 <span class="code-line highlight">    <span class="kw">for</span> (<span class="kw">const</span> tc <span class="kw">of</span> delta.tool_calls) {</span>
 <span class="code-line highlight">      events.<span class="fn">push</span>({</span>
 <span class="code-line highlight">        event: <span class="str">'response.function_call_arguments.delta'</span>,</span>
-<span class="code-line highlight">        data: { call_id: tc.id, delta: tc.function?.arguments || <span class="str">''</span> },</span>
+<span class="code-line highlight">        data: { call_id: tc.id, index: tc.index, delta: tc.function?.arguments || <span class="str">''</span> },</span>
 <span class="code-line highlight">      });<span class="ann-marker" onclick="document.getElementById('a16').scrollIntoView({behavior:'smooth'})">16</span></span>
 <span class="code-line highlight">    }</span>
 <span class="code-line highlight">  }</span>
 <span class="code-line"></span>
-<span class="code-line">  <span class="kw">return</span> events.length > <span class="num">0</span> ? events : <span class="kw">null</span>;</span>
+<span class="code-line highlight">  <span class="kw">if</span> (choice.finish_reason) events.<span class="fn">push</span>({ event: <span class="str">__internal.finish</span> });</span>
+	<span class="code-line">  <span class="kw">return</span> events.length > <span class="num">0</span> ? events : <span class="kw">null</span>;</span>
 <span class="code-line">}</span>
     </code></pre>
   </div>
@@ -779,7 +782,7 @@ footer {
     <div class="lc-step">
       <div class="step-num">Step 4</div>
       <div class="step-event">*_text.delta × N</div>
-      <div class="step-note">逐块发送推理和正文增量，携带 <code>item_id</code></div>
+      <div class="step-note">逐块发送推理、正文、工具调用增量，携带 <code>item_id</code></div>
     </div>
     <div class="lc-arrow">→</div>
     <div class="lc-step">
@@ -877,7 +880,7 @@ footer {
 </div>
 
 <footer>
-  <p>proxy.js — 总行数 587 · 零外部依赖 · 纯 Node.js 标准库</p>
+  <p>proxy.js — 总行数 858 · 零外部依赖 · 纯 Node.js 标准库</p>
 </footer>
 
 </body>
